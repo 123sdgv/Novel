@@ -302,7 +302,7 @@ async function generate(parent, summary = false) {
     }
   }
   const textNode = document.createTextNode('');
-  container.innerHTML = '<article class="message author-ai"><div class="byline"><img alt="" src="./icons/book.svg"><b>'+(summary?'章节总结':'Novel Chat')+'</b></div><div class="prose"></div></article>';
+  container.innerHTML = '<article class="message author-ai"><div class="prose"></div></article>';
   container.querySelector('.prose').append(textNode);
   let output='', nodeId=null, checkpoint=0, savedLength=0, persistenceFailed=false;
   const stopClock = () => { status.firstChild.textContent=summary?'正在整理总结':'正在生成'; };

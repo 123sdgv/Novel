@@ -74,7 +74,6 @@ export function backupPanel(empty) {
   return `<div class="drawer-head"><h2 id="backup-title">备份</h2>${iconButton('close-drawer','close','关闭')}</div>
   ${button('import-all','导入备份','drawer-action')}${button('export-all','导出','drawer-action','',empty?'disabled':'')}`;
 }
-const icon = '<img alt="" src="./icons/book.svg">';
 export function messageMarkup(node, siblings, last) {
   const index = siblings.findIndex(n => n.id === node.id);
   const version = siblings.length > 1 ? `<div class="version">
@@ -85,9 +84,8 @@ export function messageMarkup(node, siblings, last) {
   const actions = act('edit','pencil','编辑')+act('copy','copy','复制')+act('remove','trash','删除');
   const ai = node.role === 'assistant';
   return `<article class="message ${ai?'author-ai':'author-user'}" data-node="${esc(node.id)}">
-    <div class="byline">${ai? icon+'<b>Novel Chat</b>' : '<b>你</b>'}${version}</div>
     <div class="prose">${esc(node.text)}</div><div class="msg-actions">${actions}
-    ${ai?act('regenerate','refresh','重新生成'):last?act('reply','play','生成回复'):''}</div></article>`;
+    ${ai?act('regenerate','refresh','重新生成'):last?act('reply','play','生成回复'):''}${version}</div></article>`;
 }
 export function chatView(story) {
   const c = activeChat(story), nodes = path(c);

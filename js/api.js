@@ -68,22 +68,49 @@ function content(value) {
   if (typeof value === 'string') return value;
   return Array.isArray(value) ? value.map(v => typeof v?.text === 'string' ? v.text : '').join('') : '';
 }
-const temperatureFor = new Map();
+const temps = new Map();
+function savedTemperature(model) {
+  if (temps.has(model)) return temps.get(model);
+  try { const v = localStorage.getItem('novel-temperature:' + model); if (v !== null) return v === 'omit' ? null : Number(v); } catch { /* No storage: stay in memory. */ }
+  return undefined;
+}
+function saveTemperature(model, value) {
+  temps.set(model, value);
+  try { localStorage.setItem('novel-temperature:' + model, value === null ? 'omit' : String(value)); } catch { /* Memory is enough. */ }
+}
+function pause(ms, signal) {
+  return new Promise((resolve, reject) => {
+    const fail = () => { clearTimeout(timer); reject(signal.reason); };
+    const timer = setTimeout(() => { signal?.removeEventListener('abort', fail); resolve(); }, ms);
+    signal?.addEventListener('abort', fail, { once: true });
+    if (signal?.aborted) fail();
+  });
+}
 export async function completion(config, messages, { mode = 'write', signal, onText = () => {} } = {}) {
   if (!config.model.trim()) throw new Error('请先填写模型 ID。');
   const testing = mode === 'test';
   const body = { model:config.model.trim(), messages, stream:!testing, max_tokens: testing ? 16 : mode === 'summary' ? 2000 : 8192 };
-  const learned = temperatureFor.get(body.model);
+  const learned = savedTemperature(body.model);
   if (!testing && learned !== null) body.temperature = learned ?? (mode === 'summary' ? 0.3 : 0.8);
-  try { return await send(); }
-  catch (error) {
-    // Some models accept only one temperature; use the value the server names, or omit it, and remember that.
-    if (body.temperature === undefined || !String(error.message).startsWith('HTTP 400') || !/temperature/i.test(error.message)) throw error;
-    const only = /only\s+(-?[\d.]+)\s+is allowed/i.exec(error.message);
-    const value = only ? Number(only[1]) : null;
-    temperatureFor.set(body.model, value);
-    if (value === null) delete body.temperature; else body.temperature = value;
-    return send();
+  let rateWaits = 0, temperatureFixed = false;
+  for (;;) {
+    try { return await send(); }
+    catch (error) {
+      const message = String(error.message);
+      // Rate limit that names a wait: pause, then try again (the answer has not started yet).
+      const wait = message.startsWith('HTTP 429') && /after\s+(\d+)\s+seconds?/i.exec(message);
+      if (wait && rateWaits < 3 && Number(wait[1]) <= 30) { rateWaits++; await pause((Number(wait[1]) + 1) * 1000, signal); continue; }
+      // A model that accepts one temperature only: use the value the server names, or omit it, and remember that.
+      if (!temperatureFixed && body.temperature !== undefined && message.startsWith('HTTP 400') && /temperature/i.test(message)) {
+        temperatureFixed = true;
+        const only = /only\s+(-?[\d.]+)\s+is allowed/i.exec(message);
+        const value = only ? Number(only[1]) : null;
+        saveTemperature(body.model, value);
+        if (value === null) delete body.temperature; else body.temperature = value;
+        continue;
+      }
+      throw error;
+    }
   }
   function send() { return request(config, 'chat/completions', body, signal, async (response, bump) => {
     let finish = null, done = false, hasText = false;

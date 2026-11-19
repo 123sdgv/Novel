@@ -72,3 +72,19 @@ test('模型只允许固定 temperature 时，按提示值自动重试并记住'
   await completion(fixed,[],{onText:()=>{}});
   assert.deepEqual(temps,[0.8,1,1]);
 });
+test('429 提示等待秒数时自动等待后重试，等待中可停止',async t=>{
+  let calls=0;
+  mock(t,async()=>{
+    calls++;
+    if (calls===1) return Response.json({error:{message:'max RPM: 3, please try again after 0 seconds'}},{status:429});
+    return stream([utf8(packet('好')+'data: [DONE]\n\n')]);
+  });
+  let out='';
+  await completion({...config,model:'rate-model'},[],{mode:'summary',onText:v=>{out+=v}});
+  assert.equal(out,'好');assert.equal(calls,2);
+  calls=0;const stop=new AbortController();
+  mock(t,async()=>{calls++;return Response.json({error:{message:'try again after 20 seconds'}},{status:429});});
+  const pending=completion({...config,model:'rate-model'},[],{signal:stop.signal});
+  setTimeout(()=>stop.abort(new Error('已停止')),30);
+  await assert.rejects(pending,/已停止/);assert.equal(calls,1);
+});
