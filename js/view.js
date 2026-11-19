@@ -16,7 +16,10 @@ const paths = {
   close: '<path d="m6 6 12 12M18 6 6 18"/>',
   down: '<path d="m7 10 5 5 5-5"/>',
   send: '<path d="M12 19V5M6 11l6-6 6 6"/>',
-  note: '<path d="M6 4h12v16H6zM9 9h6M9 13h6M9 17h3"/>'
+  note: '<path d="M6 4h12v16H6zM9 9h6M9 13h6M9 17h3"/>',
+  copy: '<rect x="8.5" y="8.5" width="11" height="11.5" rx="2"/><path d="M15.5 8.5V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8.5a2 2 0 0 0 2 2h2.5"/>',
+  refresh: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5v4h-4"/>',
+  play: '<path d="M8 5.5v13l10.5-6.5z"/>'
 };
 export function glyph(name) {
   return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round">${paths[name]}</svg>`;
@@ -78,12 +81,13 @@ export function messageMarkup(node, siblings, last) {
     ${button('version','‹','',siblings[index-1]?.id,'aria-label="上一版本"'+(!index?' disabled':''))}
     <span>${index+1} / ${siblings.length}</span>
     ${button('version','›','',siblings[index+1]?.id,'aria-label="下一版本"'+(index===siblings.length-1?' disabled':''))}</div>` : '';
-  const actions = button('edit','编辑','',node.id)+button('copy','复制','',node.id)+button('remove','删除','',node.id);
+  const act = (name, icon, label) => button(name,glyph(icon),'act',node.id,`aria-label="${label}" title="${label}"`);
+  const actions = act('edit','pencil','编辑')+act('copy','copy','复制')+act('remove','trash','删除');
   const ai = node.role === 'assistant';
   return `<article class="message ${ai?'author-ai':'author-user'}" data-node="${esc(node.id)}">
     <div class="byline">${ai? icon+'<b>Novel Chat</b>' : '<b>你</b>'}${version}</div>
     <div class="prose">${esc(node.text)}</div><div class="msg-actions">${actions}
-    ${ai?button('regenerate','重新生成','',node.id):last?button('reply','生成回复','',node.id):''}</div></article>`;
+    ${ai?act('regenerate','refresh','重新生成'):last?act('reply','play','生成回复'):''}</div></article>`;
 }
 export function chatView(story) {
   const c = activeChat(story), nodes = path(c);

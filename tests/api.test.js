@@ -59,3 +59,16 @@ test('HTTP 错误带原因且遮盖回显凭据，网络错误给出 CORS 提示
   code=0;await assert.rejects(getModels(config),/CORS/);
 });
 
+test('模型只允许固定 temperature 时，按提示值自动重试并记住',async t=>{
+  const temps=[];
+  mock(t,async(url,opts)=>{
+    const body=JSON.parse(opts.body);temps.push(body.temperature);
+    if (body.temperature!==1) return Response.json({error:{message:'invalid temperature: only 1 is allowed for this model'}},{status:400});
+    return stream([utf8(packet('好')+'data: [DONE]\n\n')]);
+  });
+  const fixed={...config,model:'fixed-temp-model'};let out='';
+  await completion(fixed,[],{onText:v=>{out+=v}});
+  assert.equal(out,'好');assert.deepEqual(temps,[0.8,1]);
+  await completion(fixed,[],{onText:()=>{}});
+  assert.deepEqual(temps,[0.8,1,1]);
+});

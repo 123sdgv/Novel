@@ -68,12 +68,24 @@ function content(value) {
   if (typeof value === 'string') return value;
   return Array.isArray(value) ? value.map(v => typeof v?.text === 'string' ? v.text : '').join('') : '';
 }
+const temperatureFor = new Map();
 export async function completion(config, messages, { mode = 'write', signal, onText = () => {} } = {}) {
   if (!config.model.trim()) throw new Error('请先填写模型 ID。');
   const testing = mode === 'test';
   const body = { model:config.model.trim(), messages, stream:!testing, max_tokens: testing ? 16 : mode === 'summary' ? 2000 : 8192 };
-  if (!testing) body.temperature = mode === 'summary' ? 0.3 : 0.8;
-  return request(config, 'chat/completions', body, signal, async (response, bump) => {
+  const learned = temperatureFor.get(body.model);
+  if (!testing && learned !== null) body.temperature = learned ?? (mode === 'summary' ? 0.3 : 0.8);
+  try { return await send(); }
+  catch (error) {
+    // Some models accept only one temperature; use the value the server names, or omit it, and remember that.
+    if (body.temperature === undefined || !String(error.message).startsWith('HTTP 400') || !/temperature/i.test(error.message)) throw error;
+    const only = /only\s+(-?[\d.]+)\s+is allowed/i.exec(error.message);
+    const value = only ? Number(only[1]) : null;
+    temperatureFor.set(body.model, value);
+    if (value === null) delete body.temperature; else body.temperature = value;
+    return send();
+  }
+  function send() { return request(config, 'chat/completions', body, signal, async (response, bump) => {
     let finish = null, done = false, hasText = false;
     async function accept(data) {
       if (data.error) throw new Error('服务商错误：' + redact(data.error.message || data.error, config.key));
@@ -121,6 +133,5 @@ export async function completion(config, messages, { mode = 'write', signal, onT
     if (finish === 'content_filter') throw new Error('服务商中止了正文输出。');
     if (!hasText && !(testing && finish)) throw new Error('接口已响应，但没有返回正文，请检查模型。');
     return finish;
-  });
+  }); }
 }
-
