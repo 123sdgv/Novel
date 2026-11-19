@@ -22,8 +22,8 @@ function fill(selector, value) {
 async function inlineName(value) {
   const field=el('.name-form input');
   ok(field && !el('#modal[open]'),'名称须在原行编辑');
-  equal(el('.name-form').innerText.trim(),'保存');
-  fill('.name-form input',value);await action('.name-form [type="submit"]');
+  equal(el('.name-form').innerText.trim(),'');
+  fill('.name-form input',value);el('.name-form').requestSubmit();await tick(100);
 }
 async function dialogText(value) {
   await wait(()=>el('dialog[open] [name=value]'),'编辑弹窗');
@@ -97,15 +97,14 @@ async function main() {
   equal(el('#nav h1').textContent,'Novel');
   await openDrawer();ok(el('[data-action="export-all"]').disabled,'空书架不应可导出');
   await click('close-drawer');
-  await click('new-story');fill('.name-form input','取消的书稿');await click('cancel-name');
-  equal(el('#app').innerText.trim(),'');
-  await click('new-story');await inlineName('验收书稿');await wait(()=>el('#draft'),'聊天');
+  await click('new-story');await wait(()=>el('#draft'),'点加号直接新建并进入聊天');
+  equal(el('#nav .bar-title span').textContent,'对话 1');
   equal(el('.reading').innerText.trim(),'');
-  ok(!el('[data-action="home"]') && !el('.session-button'),'聊天页不应显示主页入口或旧下拉框');
+  ok(el('#nav .bar-title[data-action="chats"]') && !el('.session-button'),'标题应为对话名并可打开对话栏');
   ok(el('[data-action="settings"] svg') && !el('#nav').innerText.includes('设置'),'设置应使用图标');
   ok(el('[data-action="summary"]').getBoundingClientRect().right<=el('[data-action="send"]').getBoundingClientRect().left,'总结应在发送左边');
   await click('settings');await click('home');
-  equal(el('.book-row').innerText.trim(),'验收书稿');
+  equal(el('.book-row').innerText.trim(),'故事 1');
   const originalLeft=el('.book-open').getBoundingClientRect().left;
   swipe(-120,4);
   await wait(()=>el('.book-row.revealed'),'左滑只展开');
@@ -115,7 +114,7 @@ async function main() {
     return Math.abs(face.left-originalLeft)<1 && Math.abs(face.right-editBox.left)<1;
   },'展开后保留书名并露出操作');
   ok(el('.rename').textContent.trim()==='' && el('.delete').textContent.trim()==='','色块包含文字');
-  await click('rename-story');equal(el('.name-form input').value,'验收书稿');
+  await click('rename-story');equal(el('.name-form input').value,'故事 1');
   await inlineName('验收书稿 · 修订');
   equal(el('.book-open').textContent,'验收书稿 · 修订');
   swipe(-120);await click('delete-story');await action('[data-return="cancel"]');
@@ -182,7 +181,8 @@ async function main() {
   ok(panel.open && !el('#modal[open]') && rows()[1].hasAttribute('aria-current'),'松手不应切换或编辑');
   await rowClick(0,'rename-chat');equal(el('.name-form input').value,'对话 1');
   await inlineName('第一章');equal(rows()[0].textContent,'第一章');
-  await click('new-chat');await inlineName('临时对话');ok(!panel.open,'新建后应进入对话');
+  await click('new-chat');ok(!panel.open,'新建后应进入对话');
+  equal(el('#nav .bar-title span').textContent,'对话 3');
   equal(prose(),[]);await click('chats');equal(rows().length,3);
   swipe(-120);await rowClick(0,'delete-chat');ok(el('#modal[open] .icon-button svg'),'关闭须为 SVG');
   await action('#modal [data-return="cancel"]');equal(rows().length,3);

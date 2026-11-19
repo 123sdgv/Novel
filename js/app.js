@@ -178,19 +178,34 @@ function renderNames(kind) {
   if (kind === 'story') app.innerHTML = overview([...catalog.values()]);
   else drawer.innerHTML = sessionPanel(story());
 }
-function startName(kind, id = '') {
+function freshName(prefix, used) {
+  let n = used.length + 1;
+  while (used.includes(prefix + ' ' + n)) n++;
+  return prefix + ' ' + n;
+}
+async function createStory() {
+  const s = newStory(freshName('故事', [...catalog.values()].map(x => x.title)));
+  await addStories(db,[s]);
+  catalog.set(s.id,s);
+  await go('chat',s.id);
+}
+async function createChat() {
+  await updateCurrent(s => {
+    const c = newChat(freshName('对话', s.chats.map(x => x.name)));
+    s.chats.push(c);
+    s.active = c.id;
+  });
+  drawer.close();
+  draw({bottom:true});
+}
+function startName(kind, id) {
   const root = kind === 'story' ? app : drawer;
   const existing = root.querySelector('.name-form');
   if (existing?.dataset.id === id) { existing.elements.name.focus(); return; }
   if (existing) renderNames(kind);
-  const list = root.querySelector('.book-list');
-  let row = id ? list.querySelector(`[data-id="${CSS.escape(id)}"]`) : null;
-  if (id && !row) return;
-  const value = row ? row.querySelector('.book-open').textContent : '';
-  if (!row) {
-    row = document.createElement('li');
-    list.prepend(row);
-  }
+  const row = root.querySelector(`.book-list [data-id="${CSS.escape(id)}"]`);
+  if (!row) return;
+  const value = row.querySelector('.book-open').textContent;
   row.className = 'editing-name';
   row.innerHTML = nameForm(kind,id,value);
   const input = row.querySelector('input');
@@ -198,31 +213,18 @@ function startName(kind, id = '') {
   input.select();
 }
 async function saveName(form) {
-  const input = form.elements.name, value = input.value.trim();
-  if (!value) { input.focus(); return; }
+  form.dataset.done = '1';
+  const value = form.elements.name.value.trim();
   const {kind,id} = form.dataset;
-  if (kind === 'story') {
-    if (id) {
-      await update(id,s => { s.title=value; });
-      renderNames(kind);
-    } else {
-      const s = newStory(value);
-      await addStories(db,[s]);
-      catalog.set(s.id,s);
-      await go('chat',s.id);
-    }
-    return;
-  }
-  await updateCurrent(s => {
-    if (id) s.chats.find(c=>c.id===id).name=value;
+  const old = kind === 'story' ? catalog.get(id)?.title : story().chats.find(c=>c.id===id)?.name;
+  if (value && value !== old) {
+    if (kind === 'story') await update(id,s => { s.title=value; });
     else {
-      const c=newChat(value);
-      s.chats.push(c);
-      s.active=c.id;
+      await updateCurrent(s => { s.chats.find(c=>c.id===id).name=value; });
+      nav.innerHTML = toolbar(page,story(),editingWorld);
     }
-  });
-  if (id) renderNames(kind);
-  else { drawer.close(); draw({bottom:true}); }
+  }
+  renderNames(kind);
 }
 async function deleteStory(id) {
   const s = catalog.get(id);
@@ -383,9 +385,10 @@ async function dispatch(action,id) {
   if (action==='world') return go('world');
   if (action==='edit-world') { editingWorld=true; draw(); return; }
   if (action==='back-world' || action==='save-world') return go('settings');
-  if (action==='new-story' || action==='rename-story') return startName('story',id);
-  if (action==='new-chat' || action==='rename-chat') return startName('chat',id);
-  if (action==='cancel-name') return renderNames(drawer.open?'chat':'story');
+  if (action==='new-story') return createStory();
+  if (action==='new-chat') return createChat();
+  if (action==='rename-story') return startName('story',id);
+  if (action==='rename-chat') return startName('chat',id);
   if (action==='delete-story') return deleteStory(id);
   if (action==='delete-chat') return deleteChat(id);
   if (action==='backup-panel') return openDrawer('backup');
@@ -459,12 +462,17 @@ document.addEventListener('submit',event=>{
 document.addEventListener('keydown',event=>{
   if (event.key==='Escape' && event.target.closest('.name-form') && !event.isComposing) {
     event.preventDefault();
+    event.target.closest('.name-form').dataset.done = '1';
     renderNames(drawer.open?'chat':'story');
     return;
   }
   if (event.target.id==='draft' && event.key==='Enter' && (event.ctrlKey || event.metaKey) && !event.isComposing) {
     event.preventDefault(); run(send);
   }
+});
+document.addEventListener('focusout',event=>{
+  const form = event.target.closest?.('.name-form');
+  if (form && !form.dataset.done && form.isConnected) run(()=>saveName(form));
 });
 document.addEventListener('input',event=>{
   if (event.target.id!=='draft') return;

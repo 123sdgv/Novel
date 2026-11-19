@@ -13,7 +13,10 @@ const paths = {
   trash: '<path d="M4 6.5h16M9 6V4h6v2M6 7l1 13h10l1-13M10 10v7m4-7v7"/>',
   circle: '<circle cx="12" cy="12" r="9"/>',
   check: '<path d="m4.5 12 5.2 5.3 10-11"/>',
-  close: '<path d="m6 6 12 12M18 6 6 18"/>'
+  close: '<path d="m6 6 12 12M18 6 6 18"/>',
+  down: '<path d="m7 10 5 5 5-5"/>',
+  send: '<path d="M12 19V5M6 11l6-6 6 6"/>',
+  note: '<path d="M6 4h12v16H6zM9 9h6M9 13h6M9 17h3"/>'
 };
 export function glyph(name) {
   return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round">${paths[name]}</svg>`;
@@ -36,9 +39,10 @@ export function toolbar(page, story, editing = false) {
     title = '';
     right = iconButton('home','menu','故事总览');
   } else {
-    left = iconButton('chats','back','对话列表');
-    title = story.title;
+    left = iconButton('home','back','返回故事总览');
     right = iconButton('settings','settings','故事设置');
+    const name = activeChat(story).name;
+    return left + `<button type="button" class="bar-title" data-action="chats" aria-label="切换对话：${esc(name)}"><span>${esc(name)}</span>${glyph('down')}</button>` + right;
   }
   return left + (title ? `<h1 class="bar-title">${esc(title)}</h1>` : '<span></span>') + right;
 }
@@ -62,7 +66,7 @@ export function sessionPanel(story) {
 export function nameForm(kind,id,value) {
   return `<form class="name-form" data-kind="${kind}" data-id="${esc(id)}">
     <input name="name" aria-label="${kind==='chat'?'对话名称':'故事名称'}" value="${esc(value)}" maxlength="160" required autocomplete="off" enterkeyhint="done">
-    <button type="submit" class="primary">保存</button>${iconButton('cancel-name','close','取消编辑')}</form>`;
+    </form>`;
 }
 export function backupPanel(empty) {
   return `<div class="drawer-head"><h2 id="backup-title">备份</h2>${iconButton('close-drawer','close','关闭')}</div>
@@ -92,9 +96,9 @@ export function chatView(story) {
     <div id="stream"></div></div></div>
     <div class="composer-wrap"><div id="generation-status" class="generation-status" role="status"></div>
     <form id="composer"><textarea id="draft" rows="2" aria-label="写作要求" placeholder="写作要求…">${esc(c.draft)}</textarea>
-    <div class="composer-actions"><div>
-    ${button('summary','总结','outline','','aria-label="章节总结"'+(!nodes.length?' disabled':''))}
-    <button class="primary send" data-action="send" type="submit" aria-label="发送">发送 <span aria-hidden="true">↑</span></button></div></div></form></div></section>`;
+    <div class="composer-actions">
+    ${button('summary',glyph('note'),'round','','aria-label="章节总结" title="章节总结"'+(!nodes.length?' disabled':''))}
+    <button class="round send" data-action="send" type="submit" aria-label="发送" title="发送">${glyph('send')}</button></div></form></div></section>`;
 }
 export function settings(config) {
   return `<section class="narrow">
