@@ -1,6 +1,6 @@
 const scope = self.registration.scope;
 const prefix = 'novel-chat:' + scope + ':';
-const cacheName = prefix + '1.3.0-1';
+const cacheName = prefix + '1.3.1-1';
 const assets = ['./', './index.html', './style.css', './manifest.webmanifest', './icons/book.svg',
   './icons/book-192.png', './icons/book-512.png', './icons/book-mask.png',
   './js/app.js', './js/view.js', './js/story.js', './js/swipe.js', './js/backup.js', './js/api.js', './js/db.js'];

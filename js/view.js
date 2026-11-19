@@ -39,10 +39,9 @@ export function toolbar(page, story, editing = false) {
     title = '';
     right = iconButton('home','menu','故事总览');
   } else {
-    left = iconButton('home','back','返回故事总览');
     right = iconButton('settings','settings','故事设置');
     const name = activeChat(story).name;
-    return left + `<button type="button" class="bar-title" data-action="chats" aria-label="切换对话：${esc(name)}"><span>${esc(name)}</span>${glyph('down')}</button>` + right;
+    return '<span></span>' + `<button type="button" class="bar-title" data-action="chats" aria-label="切换对话：${esc(name)}"><span>${esc(name)}</span>${glyph('down')}</button>` + right;
   }
   return left + (title ? `<h1 class="bar-title">${esc(title)}</h1>` : '<span></span>') + right;
 }
