@@ -72,9 +72,58 @@ async function main() {
     const field=el('#import-file');field.files=dt.files;field.dispatchEvent(new Event('change',{bubbles:true}));
     await tick(120);
   }
-  installMock();mobile();await click('new-story');await dialogText('验收书稿');await wait(()=>el('#draft'),'聊天');
-  await click('world');fill('#world-text','港口起雾');await action('#world-form .primary');
-  await click('settings');fill('#api-url','https://novel-test.invalid/v1');fill('#api-key',fixtureKey);
+  function swipe(dx,dy=0) {
+    const face = el('.book-open');
+    const start = { x:210, y:face.getBoundingClientRect().top + 20 };
+    for (const [type,multiplier] of [['pointerdown',0],['pointermove',0.5],['pointermove',1],['pointerup',1]]) {
+      face.dispatchEvent(new (w().PointerEvent)(type,{
+        bubbles:true,isPrimary:true,pointerType:'touch',pointerId:2,button:0,
+        clientX:start.x+dx*multiplier,clientY:start.y+dy*multiplier
+      }));
+    }
+    face.dispatchEvent(new (w().MouseEvent)('click',{bubbles:true,cancelable:true,detail:1}));
+  }
+  async function openDrawer() {
+    await click('backup-panel'); await wait(()=>el('#backup-drawer[open]'),'侧栏打开');
+  }
+  installMock();mobile();
+  equal(el('#app').innerText.trim(),'');
+  equal(el('#nav h1').textContent,'Novel');
+  await openDrawer();ok(el('[data-action="export-all"]').disabled,'空书架不应可导出');
+  await click('close-backup');
+  await click('new-story');await dialogText('验收书稿');await wait(()=>el('#draft'),'聊天');
+  equal(el('.reading').innerText.trim(),'');
+  await click('home');
+  equal(el('.book-row').innerText.trim(),'验收书稿');
+  const originalLeft=el('.book-open').getBoundingClientRect().left;
+  swipe(-120,4);
+  await wait(()=>el('.book-row.revealed'),'左滑只展开');
+  ok(!el('dialog[open]') && !el('#draft'),'滑动触发了操作');
+  await wait(()=>{
+    const face=el('.book-open').getBoundingClientRect(), editBox=el('.rename').getBoundingClientRect();
+    return Math.abs(face.left-originalLeft)<1 && Math.abs(face.right-editBox.left)<1;
+  },'展开后保留书名并露出操作');
+  ok(el('.rename').textContent.trim()==='' && el('.delete').textContent.trim()==='','色块包含文字');
+  await click('rename-story');await dialogText('验收书稿 · 修订');
+  equal(el('.book-open').textContent,'验收书稿 · 修订');
+  swipe(-120);await click('delete-story');await action('[data-return="cancel"]');
+  equal(d().querySelectorAll('.book-row').length,1);
+  swipe(-120);swipe(85);ok(!el('.book-row.revealed'),'右滑未收起');
+  swipe(-9,65);ok(!el('.book-row.revealed') && !el('#draft'),'纵向滚动触发了操作');
+  await click('open');await click('settings');await click('world');
+  ok(!el('#world-text') && el('.note-text').textContent==='','空白世界观应当只读');
+  await click('edit-world');ok(d().activeElement===el('#world-text'),'编辑器未聚焦');
+  fill('#world-text','港口起雾');await click('save-world');
+  ok(el('#api-form') && !el('dialog[open]'),'点勾应保存并返回设置');
+  await click('world');equal(el('.note-text').textContent,'港口起雾');await click('back-world');
+  for (const width of [320,390]) {
+    frame.style.width=width+'px';await tick(40);
+    const box=el('#api-form .paired-actions').getBoundingClientRect();
+    const save=el('#api-form .primary').getBoundingClientRect(),test=el('[data-action="test"]').getBoundingClientRect();
+    ok(save.top===test.top && Math.abs(save.width-test.width)<1 && Math.abs(box.right-test.right)<1,'API 操作未横向均分');mobile();
+  }
+  log('通过：精简书架、侧栏、左滑与点按分离、返回收起、笔记阅读与编辑、320/390px 等宽按钮');
+  fill('#api-url','https://novel-test.invalid/v1');fill('#api-key',fixtureKey);
   fill('#api-model','手填模型');await click('test');ok(el('#api-status').textContent.includes('连接成功'),'短测试失败');
   await click('models');await action('[data-return="0"]');await wait(()=>el('#api-model').value==='test-model','选中模型');equal(el('#api-model').value,'test-model');
   await action('#api-form .primary');await click('back-chat');mobile();
@@ -109,14 +158,17 @@ async function main() {
   const one=grabbed;ok(!JSON.stringify(one).includes(fixtureKey),'备份含有密钥');equal(one.stories[0].chats.length,2);
   await importFile(one,'import-one');await wait(()=>el('#draft'),'单故事恢复');equal(prose().at(-1),long);
   await click('settings');equal(el('#api-key').value,'');await click('home');equal(d().querySelectorAll('.book-row').length,2);
-  grabbed=null;await click('export-all');await wait(()=>grabbed,'全局文件');equal(grabbed.stories.length,2);
-  await importFile(grabbed,'import-all');equal(d().querySelectorAll('.book-row').length,4);
-  await importFile({schemaVersion:99},'import-all');equal(d().querySelectorAll('.book-row').length,4);
+  grabbed=null;await openDrawer();await click('export-all');await wait(()=>grabbed,'全局文件');equal(grabbed.stories.length,2);
+  await openDrawer();await importFile(grabbed,'import-all');equal(d().querySelectorAll('.book-row').length,4);
+  await openDrawer();await importFile({schemaVersion:99},'import-all');equal(d().querySelectorAll('.book-row').length,4);
   log('通过：单故事和全局文件导出与恢复、密钥排除、错误导入保留现存数据');
   await click('open');await wait(()=>el('[data-node]'),'打开恢复的分支');await action('[data-node] [data-action="remove"]');await action('[data-return="cancel"]');equal(prose().at(-1),long);
   await action('[data-node] [data-action="remove"]');await action('[data-return="yes"]');
   equal(prose(),['A','A1','A 后续','A2']);
   log('通过：删除前确认，删除子树后恢复另一个版本');
+  await click('home');swipe(-110);await click('delete-story');await action('[data-return="yes"]');
+  equal(d().querySelectorAll('.book-row').length,3);
+  log('通过：点红色区域并确认后才删除故事');
   const worker=await w().navigator.serviceWorker.ready;
   ok(worker.scope===new URL('../',location.href).href,'子路径 scope 错误');
   const keys=await w().caches.keys(), cache=await w().caches.open(keys.find(s=>s.startsWith('novel-chat:'+worker.scope+':')));

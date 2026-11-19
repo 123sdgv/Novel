@@ -7,8 +7,10 @@ test('离线命中子路径入口和全部静态文件，仅拦截明确允许�
   const events={}, stored=new Map(), removed=[], prefix='novel-chat:'+scope+':';
   let claimed=false;
   const cache={
-    async addAll(names) {
-      for(const name of names) {
+    async addAll(requests) {
+      for(const request of requests) {
+        assert.equal(request.cache,'reload');
+        const name='./'+request.url.slice(scope.length);
         const rel=name==='./'?'../index.html':'../'+name.slice(2);
         const bytes=await readFile(new URL(rel,import.meta.url));
         stored.set(new URL(name,scope).href,bytes);
@@ -16,7 +18,7 @@ test('离线命中子路径入口和全部静态文件，仅拦截明确允许�
     },
     match:req=>stored.get(req.url)
   };
-  const globals={ URL, self:{ registration:{scope},clients:{claim(){claimed=true;}},
+  const globals={ URL, Request, self:{ registration:{scope},clients:{claim(){claimed=true;}},
     addEventListener(name,fn){events[name]=fn;} },caches:{open:async()=>cache,
     keys:async()=>[prefix+'old','other-project-cache'],delete:key=>removed.push(key)},
     fetch(){throw new Error('offline');} };

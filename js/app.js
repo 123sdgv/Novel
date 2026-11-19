@@ -2,15 +2,18 @@ import { newChat, newStory, activeChat, path, append, select, removeBranch, mess
 import { openDB, allStories, addStories, changeStory, readApi } from './db.js';
 import { pack, unpack } from './backup.js';
 import { endpoint, getModels, completion } from './api.js';
-import { esc, button, overview, chatView, settings, worldView } from './view.js';
+import { esc, button, toolbar, overview, backupPanel, chatView, settings, worldView } from './view.js';
+
+import { enableStorySwipes } from './swipe.js';
 
 const $ = s => document.querySelector(s);
 const app = $('#app'), nav = $('#nav'), modal = $('#modal');
+const drawer = $('#backup-drawer');
 const catalog = new Map();
 const blankApi = { url:'', key:'', model:'' };
-let db, page = 'home', sid = '', routeHash = '', api = blankApi, worldBack = 'settings';
+let db, page = 'home', sid = '', routeHash = '', api = blankApi;
 let operation = false, generation = null, serial = Promise.resolve(), draftTimer, noticeTimer, fileScope;
-let apiOriginal = '', worldOriginal = '';
+let apiOriginal = '', editingWorld = false;
 const story = () => catalog.get(sid);
 const chat = () => activeChat(story());
 function notify(message) {
@@ -99,26 +102,27 @@ function readForm() {
   return { url:$('#api-url').value.trim(), key:$('#api-key').value.trim(), model:$('#api-model').value.trim() };
 }
 function hasChanges() {
-  return (page === 'world' && $('#world-text')?.value !== worldOriginal)
-    || (page === 'settings' && $('#api-form') && JSON.stringify(readForm()) !== apiOriginal);
+  return (page === 'settings' && $('#api-form') && JSON.stringify(readForm()) !== apiOriginal);
 }
 function draw({ bottom = false } = {}) {
   const previousScroll = $('#thread')?.scrollTop || 0;
-  document.querySelector('.brand').disabled = false;
+  document.body.dataset.page = page;
   document.body.classList.toggle('chat-page', page === 'chat');
-  nav.innerHTML = page === 'home' ? '<span class="local"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="5" width="18" height="13" rx="2"/><path d="M8 21h8m-4-3v3"/></svg>本机存储</span>'
-    : page === 'chat' ? button('settings','设置','outline')
-    : page === 'world' ? button('back-world','返回','quiet')
-    : button('home','☰　故事总览','quiet') + button('back-chat','返回对话','outline');
+  nav.innerHTML = toolbar(page,story(),editingWorld);
   document.title = (page === 'home' ? '故事总览' : story().title) + ' · Novel Chat';
   if (page === 'home') app.innerHTML = overview([...catalog.values()]);
   if (page === 'settings') {
-    app.innerHTML = settings(story(), api);
+    app.innerHTML = settings(api);
     apiOriginal = JSON.stringify(readForm());
   }
   if (page === 'world') {
-    app.innerHTML = worldView(story());
-    worldOriginal = story().world;
+    app.innerHTML = worldView(story(),editingWorld);
+    if (editingWorld) {
+      const field = $('#world-text');
+      field.value = story().world;
+      field.focus();
+      field.setSelectionRange(field.value.length,field.value.length);
+    }
   }
   if (page === 'chat') {
     app.innerHTML = chatView(story());
@@ -134,6 +138,11 @@ function hashFor(target, id) { return target === 'home' ? '' : '#/' + id + '/' +
 async function go(target, id = sid, { saved = false, fromHistory = false } = {}) {
   if (generation) { notify('请先停止生成，再离开当前对话。'); return false; }
   if (!saved && hasChanges() && !await confirmAction('离开编辑页？','本次修改尚未保存。','放弃修改')) return false;
+  if (page === 'world' && editingWorld) {
+    const value = $('#world-text').value;
+    if (value !== story().world) await updateCurrent(s => { s.world = value; });
+  }
+  if (drawer.open) drawer.close();
   await flushDraft();
   if (target === 'home') {
     const latest = await allStories(db);
@@ -141,9 +150,15 @@ async function go(target, id = sid, { saved = false, fromHistory = false } = {})
     for (const item of latest) catalog.set(item.id,item);
   }
   const config = target === 'home' ? blankApi : await readApi(db, id) || blankApi;
+  const previousHash = routeHash;
+  const returningFromNote = page === 'world' && history.state?.worldFrom === hashFor(target,id);
+  editingWorld = false;
   page = target; sid = target === 'home' ? '' : id; api = config;
   routeHash = hashFor(page,sid);
-  if (!fromHistory && location.hash !== routeHash) history.pushState(null,'',location.pathname + location.search + routeHash);
+  if (!fromHistory && location.hash !== routeHash) {
+    if (returningFromNote) history.back();
+    else history.pushState(page === 'world' ? {worldFrom:previousHash} : null,'',location.pathname + location.search + routeHash);
+  }
   draw({ bottom:true }); window.scrollTo(0,0);
   return true;
 }
@@ -167,15 +182,14 @@ async function newStoryDialog() {
   await addStories(db,[s]); catalog.set(s.id,s);
   await go('chat',s.id);
 }
-async function storyMenu(id) {
+async function editStory(action, id) {
   const s = catalog.get(id);
-  const pick = await showDialog(s.title,`<div class="actions">${choice('rename','重命名')}${choice('delete','删除故事')}</div>`);
-  if (pick === 'rename') {
-    const title = await askText('重命名故事','故事名称',s.title,'保存');
-    if (title) await update(id,next=>{ next.title=title; });
-  }
-  if (pick === 'delete' && await confirmAction('删除故事？','将删除这个故事的世界观、全部对话及其分支。','删除故事')) {
-    await changeStory(db,s,null); catalog.delete(id);
+  if (action === 'rename-story') {
+    const title = await askText('编辑故事','故事名称',s.title,'保存');
+    if (title && title !== s.title) await update(id,next => { next.title=title; });
+  } else if (await confirmAction('删除「'+s.title+'」？','世界观和全部对话将一起删除。','删除')) {
+    await changeStory(db,s,null);
+    catalog.delete(id);
   }
   draw();
 }
@@ -300,7 +314,7 @@ async function generate(parent, summary = false) {
     return;
   }
   if (summary && output.trim()) {
-    const seed=await askText('章节总结','可修改后带入同一故事的新对话',output,'新建对话并带入总结',true);
+    const seed=await askText('章节总结','总结内容',output,'新建对话并带入总结',true);
     if (seed) {
       await updateCurrent(s=>{ const c=newChat('对话 '+(s.chats.length+1),seed); s.chats.push(c); s.active=c.id; });
       draw({bottom:true});
@@ -323,7 +337,7 @@ async function send() {
   await generate(id);
 }
 async function editMessage(node) {
-  const value=await askText('编辑消息','保存为新版本，原版本与后续对话可切换查看。',node.text,'保存新版本',true);
+  const value=await askText('编辑消息','新版本',node.text,'保存新版本',true);
   if (!value || value===node.text) return;
   let id;
   await updateCurrent(s=>{ id=append(activeChat(s),node.parent,node.role,value).id; });
@@ -334,22 +348,27 @@ async function dispatch(action,id) {
   if (action==='home') return go('home');
   if (action==='open') return go('chat',id);
   if (action==='settings' || action==='back-chat') return go(action==='settings'?'settings':'chat');
-  if (action==='world') { worldBack=page; return go('world'); }
-  if (action==='back-world') return go(worldBack);
-  if (action==='save-world') {
-    const value=$('#world-text').value;
-    await updateCurrent(s=>{ s.world=value; }); await go(worldBack,sid,{saved:true}); notify('世界观已保存。'); return;
-  }
+  if (action==='world') return go('world');
+  if (action==='edit-world') { editingWorld=true; draw(); return; }
+  if (action==='back-world' || action==='save-world') return go('settings');
   if (action==='new-story') return newStoryDialog();
-  if (action==='story-menu') return storyMenu(id);
+  if (action==='rename-story' || action==='delete-story') return editStory(action,id);
+  if (action==='backup-panel') {
+    drawer.innerHTML=backupPanel(!catalog.size);
+    drawer.showModal();
+    return;
+  }
+  if (action==='close-backup') { drawer.close(); return; }
   if (action==='chats') return sessions();
   if (['models','test','save-api'].includes(action)) return apiAction(action);
   if (action.startsWith('export-')) {
+    if (drawer.open) drawer.close();
     await flushDraft();
     const single=action==='export-one';
     download(pack(single?[story()]:await allStories(db),single?'story':'all'),(single?story().title:'Novel-Chat-全部故事')+'.json'); return;
   }
   if (action.startsWith('import-')) {
+    if (drawer.open) drawer.close();
     fileScope=action==='import-one'?'story':'all';
     $('#import-file').value=''; $('#import-file').click(); return;
   }
@@ -377,6 +396,12 @@ async function run(work) {
   try { await work(); } catch(e) { notify(e.message || '操作失败，请重试。'); }
   finally { operation=false; }
 }
+enableStorySwipes(app);
+drawer.addEventListener('click',event=>{
+  if (event.target !== drawer) return;
+  const rect = drawer.getBoundingClientRect();
+  if (event.clientX < rect.left || event.clientX > rect.right) drawer.close();
+});
 document.addEventListener('click',event=>{
   const target=event.target.closest('[data-action]');
   if (!target || !db) return;
@@ -385,7 +410,7 @@ document.addEventListener('click',event=>{
   run(()=>dispatch(target.dataset.action,target.dataset.id));
 });
 document.addEventListener('submit',event=>{
-  const action={composer:'send','api-form':'save-api','world-form':'save-world'}[event.target.id];
+  const action={composer:'send','api-form':'save-api'}[event.target.id];
   if (action) { event.preventDefault(); run(()=>dispatch(action)); }
 });
 document.addEventListener('keydown',event=>{
@@ -412,7 +437,7 @@ $('#import-file').addEventListener('change',event=>run(async()=>{
   notify('已导入 '+list.length+' 个故事。');
 }));
 window.addEventListener('hashchange',()=>{
-  if (!db) return;
+  if (!db || location.hash === routeHash) return;
   if (operation || modal.open) { history.replaceState(null,'',location.pathname+routeHash); return; }
   run(route);
 });
