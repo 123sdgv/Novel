@@ -15,7 +15,7 @@ const paths = {
   check: '<path d="m4.5 12 5.2 5.3 10-11"/>',
   close: '<path d="m6 6 12 12M18 6 6 18"/>'
 };
-function glyph(name) {
+export function glyph(name) {
   return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round">${paths[name]}</svg>`;
 }
 function iconButton(action, name, label, id = '', style = '') {
@@ -33,25 +33,39 @@ export function toolbar(page, story, editing = false) {
     right = editing ? iconButton('save-world','check','完成') : iconButton('edit-world','circle','编辑世界观');
   } else if (page === 'settings') {
     left = iconButton('back-chat','back','返回对话');
-    title = '设置';
+    title = '';
     right = iconButton('home','menu','故事总览');
   } else {
-    left = iconButton('home','back','故事总览');
+    left = iconButton('chats','back','对话列表');
     title = story.title;
-    right = button('settings','设置','nav-text');
+    right = iconButton('settings','settings','故事设置');
   }
   return left + (title ? `<h1 class="bar-title">${esc(title)}</h1>` : '<span></span>') + right;
 }
+function nameRow(kind, id, name, current = false) {
+  const isChat = kind === 'chat';
+  const label = isChat ? '对话' : '故事';
+  return `<li class="book-row" data-kind="${kind}" data-id="${esc(id)}">
+    ${button(isChat?'use-chat':'open',esc(name),'book-open',id,current?'aria-current="true"':'')}
+    <div class="row-actions">${iconButton('rename-'+kind,'pencil','编辑'+label,id,'rename')}
+    ${iconButton('delete-'+kind,'trash','删除'+label,id,'delete')}</div></li>`;
+}
 export function overview(stories) {
-  const rows = [...stories].sort((a,b) => b.updated.localeCompare(a.updated)).map(s =>
-    `<li class="book-row">${button('open',esc(s.title),'book-open',s.id)}
-       <div class="row-actions">${iconButton('rename-story','pencil','编辑故事',s.id,'rename')}
-       ${iconButton('delete-story','trash','删除故事',s.id,'delete')}</div></li>`
-  );
+  const rows = [...stories].sort((a,b) => b.updated.localeCompare(a.updated)).map(s => nameRow('story',s.id,s.title));
   return `<ul class="book-list" aria-label="故事列表">${rows.join('')}</ul>`;
 }
+export function sessionPanel(story) {
+  const rows = story.chats.map(c => nameRow('chat',c.id,c.name,c.id===story.active));
+  return `<div class="drawer-head">${iconButton('new-chat','plus','新建对话')}${iconButton('close-drawer','close','关闭对话栏')}</div>
+    <ul class="book-list" aria-label="对话列表">${rows.join('')}</ul>`;
+}
+export function nameForm(kind,id,value) {
+  return `<form class="name-form" data-kind="${kind}" data-id="${esc(id)}">
+    <input name="name" aria-label="${kind==='chat'?'对话名称':'故事名称'}" value="${esc(value)}" maxlength="160" required autocomplete="off" enterkeyhint="done">
+    <button type="submit" class="primary">保存</button>${iconButton('cancel-name','close','取消编辑')}</form>`;
+}
 export function backupPanel(empty) {
-  return `<div class="drawer-head"><h2 id="backup-title">备份</h2>${iconButton('close-backup','close','关闭')}</div>
+  return `<div class="drawer-head"><h2 id="backup-title">备份</h2>${iconButton('close-drawer','close','关闭')}</div>
   ${button('import-all','导入备份','drawer-action')}${button('export-all','导出','drawer-action','',empty?'disabled':'')}`;
 }
 const icon = '<img alt="" src="./icons/book.svg">';
@@ -72,17 +86,15 @@ export function chatView(story) {
   const c = activeChat(story), nodes = path(c);
   const groups = new Map();
   for (const n of c.nodes) { if (!groups.has(n.parent)) groups.set(n.parent, []); groups.get(n.parent).push(n); }
-  return `<section class="chat-shell"><div class="chat-heading">
-    ${button('chats',esc(c.name)+' <span aria-hidden="true">⌄</span>','session-button','','aria-label="切换或管理对话"')}</div>
-    <div class="thread" id="thread"><div class="reading">
+  return `<section class="chat-shell"><div class="thread" id="thread"><div class="reading">
     ${c.seed ? '<details class="seed"><summary>前情总结</summary><div class="prose">'+esc(c.seed)+'</div></details>' : ''}
     ${nodes.map((n,i)=>messageMarkup(n,groups.get(n.parent),i===nodes.length-1)).join('')}
     <div id="stream"></div></div></div>
     <div class="composer-wrap"><div id="generation-status" class="generation-status" role="status"></div>
     <form id="composer"><textarea id="draft" rows="2" aria-label="写作要求" placeholder="写作要求…">${esc(c.draft)}</textarea>
     <div class="composer-actions"><div>
-    <button class="primary send" data-action="send" type="submit" aria-label="发送">发送 <span aria-hidden="true">↑</span></button>
-    ${button('summary','总结','outline','','aria-label="章节总结"'+(!nodes.length?' disabled':''))}</div></div></form></div></section>`;
+    ${button('summary','总结','outline','','aria-label="章节总结"'+(!nodes.length?' disabled':''))}
+    <button class="primary send" data-action="send" type="submit" aria-label="发送">发送 <span aria-hidden="true">↑</span></button></div></div></form></div></section>`;
 }
 export function settings(config) {
   return `<section class="narrow">

@@ -2,13 +2,13 @@ import { newChat, newStory, activeChat, path, append, select, removeBranch, mess
 import { openDB, allStories, addStories, changeStory, readApi } from './db.js';
 import { pack, unpack } from './backup.js';
 import { endpoint, getModels, completion } from './api.js';
-import { esc, button, toolbar, overview, backupPanel, chatView, settings, worldView } from './view.js';
+import { esc, button, toolbar, overview, backupPanel, sessionPanel, nameForm, glyph, chatView, settings, worldView } from './view.js';
 
-import { enableStorySwipes } from './swipe.js';
+import { enableRowActions } from './swipe.js';
 
 const $ = s => document.querySelector(s);
 const app = $('#app'), nav = $('#nav'), modal = $('#modal');
-const drawer = $('#backup-drawer');
+const drawer = $('#side-drawer');
 const catalog = new Map();
 const blankApi = { url:'', key:'', model:'' };
 let db, page = 'home', sid = '', routeHash = '', api = blankApi;
@@ -66,7 +66,7 @@ async function flushDraft() {
 function showDialog(title, body, options = {}) {
   const wrapper = $('#modal-body');
   wrapper.innerHTML = `<div class="dialog-head"><h2 id="modal-title">${esc(title)}</h2>
-    <button type="button" data-return="cancel" aria-label="关闭弹窗">关闭</button></div>${body}`;
+    <button type="button" class="icon-button" data-return="cancel" aria-label="关闭弹窗">${glyph('close')}</button></div>${body}`;
   return new Promise(resolve => {
     function close(value) {
       modal.close();
@@ -89,9 +89,8 @@ function showDialog(title, body, options = {}) {
     if (options.focus) wrapper.querySelector(options.focus)?.focus();
   });
 }
-function askText(title, label, current, submit, long = false) {
-  const field = long ? `<textarea class="edit-long" name="value" rows="8" required>${esc(current)}</textarea>`
-    : `<input name="value" value="${esc(current)}" maxlength="160" required autocomplete="off">`;
+function askText(title, label, current, submit) {
+  const field = `<textarea class="edit-long" name="value" rows="8" required>${esc(current)}</textarea>`;
   return showDialog(title, `<form><label>${esc(label)}${field}</label><div class="actions"><button class="primary">${esc(submit)}</button></div></form>`, { focus:'[name=value]' });
 }
 const choice = (value, label, style = 'outline') => `<button type="button" class="${style}" data-return="${esc(value)}">${esc(label)}</button>`;
@@ -175,50 +174,83 @@ function download(data, filename) {
   document.body.append(a); a.click(); a.remove();
   setTimeout(()=>URL.revokeObjectURL(url),30000);
 }
-async function newStoryDialog() {
-  const title = await askText('新建故事','故事名称','','创建故事');
-  if (!title) return;
-  const s = newStory(title);
-  await addStories(db,[s]); catalog.set(s.id,s);
-  await go('chat',s.id);
+function renderNames(kind) {
+  if (kind === 'story') app.innerHTML = overview([...catalog.values()]);
+  else drawer.innerHTML = sessionPanel(story());
 }
-async function editStory(action, id) {
+function startName(kind, id = '') {
+  const root = kind === 'story' ? app : drawer;
+  const existing = root.querySelector('.name-form');
+  if (existing?.dataset.id === id) { existing.elements.name.focus(); return; }
+  if (existing) renderNames(kind);
+  const list = root.querySelector('.book-list');
+  let row = id ? list.querySelector(`[data-id="${CSS.escape(id)}"]`) : null;
+  if (id && !row) return;
+  const value = row ? row.querySelector('.book-open').textContent : '';
+  if (!row) {
+    row = document.createElement('li');
+    list.prepend(row);
+  }
+  row.className = 'editing-name';
+  row.innerHTML = nameForm(kind,id,value);
+  const input = row.querySelector('input');
+  input.focus();
+  input.select();
+}
+async function saveName(form) {
+  const input = form.elements.name, value = input.value.trim();
+  if (!value) { input.focus(); return; }
+  const {kind,id} = form.dataset;
+  if (kind === 'story') {
+    if (id) {
+      await update(id,s => { s.title=value; });
+      renderNames(kind);
+    } else {
+      const s = newStory(value);
+      await addStories(db,[s]);
+      catalog.set(s.id,s);
+      await go('chat',s.id);
+    }
+    return;
+  }
+  await updateCurrent(s => {
+    if (id) s.chats.find(c=>c.id===id).name=value;
+    else {
+      const c=newChat(value);
+      s.chats.push(c);
+      s.active=c.id;
+    }
+  });
+  if (id) renderNames(kind);
+  else { drawer.close(); draw({bottom:true}); }
+}
+async function deleteStory(id) {
   const s = catalog.get(id);
-  if (action === 'rename-story') {
-    const title = await askText('编辑故事','故事名称',s.title,'保存');
-    if (title && title !== s.title) await update(id,next => { next.title=title; });
-  } else if (await confirmAction('删除「'+s.title+'」？','世界观和全部对话将一起删除。','删除')) {
+  if (await confirmAction('删除「'+s.title+'」？','世界观和全部对话将一起删除。','删除')) {
     await changeStory(db,s,null);
     catalog.delete(id);
   }
-  draw();
+  renderNames('story');
 }
-async function sessions() {
-  await flushDraft();
-  const rows = story().chats.map(c=>`<div class="session-row">
-    ${choice('use:'+c.id,c.name,c.id===chat().id?'chosen':'')}${choice('rename:'+c.id,'改名','quiet')}${choice('delete:'+c.id,'删除','quiet')}</div>`).join('');
-  const selected = await showDialog('故事对话',`<div class="dialog-list">${rows}</div><div class="actions">${choice('new','新建对话','primary')}</div>`);
-  if (!selected) return;
-  const [action,id] = selected.split(':');
-  if (action === 'new' || action === 'rename') {
-    const target = story().chats.find(c=>c.id===id);
-    const name = await askText(action==='new'?'新建对话':'重命名对话','对话名称',target?.name || '对话 '+(story().chats.length+1),'保存');
-    if (!name) return;
-    await updateCurrent(s=>{
-      if (target) s.chats.find(c=>c.id===id).name=name;
-      else { const c=newChat(name); s.chats.push(c); s.active=c.id; }
-    });
-  } else if (action === 'use') await updateCurrent(s=>{ s.active=id; });
-  else if (action === 'delete') {
-    if (!await confirmAction('删除对话？','将删除此对话的全部消息与版本。故事世界观会保留。','删除对话')) return;
+async function deleteChat(id) {
+  const target = story().chats.find(c=>c.id===id);
+  if (await confirmAction('删除「'+target.name+'」？','此对话及其全部版本将一起删除。','删除')) {
     await updateCurrent(s=>{
       s.chats=s.chats.filter(c=>c.id!==id);
       if (!s.chats.length) s.chats.push(newChat());
       if (s.active===id) s.active=s.chats[0].id;
     });
     stash(sid,id,null);
+    draw({bottom:true});
   }
-  draw({bottom:true});
+  renderNames('chat');
+}
+async function openDrawer(panel) {
+  if (panel === 'sessions') await flushDraft();
+  drawer.dataset.panel = panel;
+  drawer.setAttribute('aria-label',panel==='sessions' ? '对话' : '备份');
+  drawer.innerHTML = panel==='sessions' ? sessionPanel(story()) : backupPanel(!catalog.size);
+  drawer.showModal();
 }
 function verified(config, withModel = true) {
   endpoint(config.url,'models');
@@ -249,7 +281,7 @@ async function apiAction(action) {
 async function requireApi() {
   try { verified(api); return true; }
   catch {
-    if (await confirmAction('配置 API 后开始写作','填写兼容接口的 URL、API Key 和模型 ID，即可生成正文。','前往设置')) await go('settings');
+    if (await confirmAction('配置 API','请填写 URL、API Key 和模型 ID。','配置 API')) await go('settings');
     return false;
   }
 }
@@ -276,7 +308,7 @@ async function generate(parent, summary = false) {
   const tick = () => { status.firstChild.textContent='等待正文 · '+Math.floor((performance.now()-started)/1000)+'s'; };
   tick(); const clock=setInterval(tick,250);
   $('#draft').readOnly=true;
-  document.querySelectorAll('#composer button,.msg-actions button,.version button,.chat-heading button,header button').forEach(b=>{b.disabled=true;});
+  document.querySelectorAll('#composer button,.msg-actions button,.version button,header button').forEach(b=>{b.disabled=true;});
   thread.scrollTop=thread.scrollHeight;
   async function persist() {
     if (summary || savedLength===output.length || persistenceFailed) return;
@@ -310,11 +342,11 @@ async function generate(parent, summary = false) {
   }
   if (message) notify(message);
   if (persistenceFailed && output) {
-    await askText('保存失败，请先复制这段正文','未保存的正文',output,'关闭',true);
+    await showDialog('保存失败，请先复制这段正文',`<textarea class="edit-long" rows="8" aria-label="未保存的正文" readonly>${esc(output)}</textarea>`);
     return;
   }
   if (summary && output.trim()) {
-    const seed=await askText('章节总结','总结内容',output,'新建对话并带入总结',true);
+    const seed=await askText('章节总结','总结内容',output,'新建对话并带入总结');
     if (seed) {
       await updateCurrent(s=>{ const c=newChat('对话 '+(s.chats.length+1),seed); s.chats.push(c); s.active=c.id; });
       draw({bottom:true});
@@ -337,7 +369,7 @@ async function send() {
   await generate(id);
 }
 async function editMessage(node) {
-  const value=await askText('编辑消息','新版本',node.text,'保存新版本',true);
+  const value=await askText('编辑消息','新版本',node.text,'保存新版本');
   if (!value || value===node.text) return;
   let id;
   await updateCurrent(s=>{ id=append(activeChat(s),node.parent,node.role,value).id; });
@@ -351,15 +383,20 @@ async function dispatch(action,id) {
   if (action==='world') return go('world');
   if (action==='edit-world') { editingWorld=true; draw(); return; }
   if (action==='back-world' || action==='save-world') return go('settings');
-  if (action==='new-story') return newStoryDialog();
-  if (action==='rename-story' || action==='delete-story') return editStory(action,id);
-  if (action==='backup-panel') {
-    drawer.innerHTML=backupPanel(!catalog.size);
-    drawer.showModal();
+  if (action==='new-story' || action==='rename-story') return startName('story',id);
+  if (action==='new-chat' || action==='rename-chat') return startName('chat',id);
+  if (action==='cancel-name') return renderNames(drawer.open?'chat':'story');
+  if (action==='delete-story') return deleteStory(id);
+  if (action==='delete-chat') return deleteChat(id);
+  if (action==='backup-panel') return openDrawer('backup');
+  if (action==='chats') return openDrawer('sessions');
+  if (action==='close-drawer') { drawer.close(); return; }
+  if (action==='use-chat') {
+    if (chat().id !== id) await updateCurrent(s => { s.active=id; });
+    drawer.close();
+    draw({bottom:true});
     return;
   }
-  if (action==='close-backup') { drawer.close(); return; }
-  if (action==='chats') return sessions();
   if (['models','test','save-api'].includes(action)) return apiAction(action);
   if (action.startsWith('export-')) {
     if (drawer.open) drawer.close();
@@ -396,7 +433,8 @@ async function run(work) {
   try { await work(); } catch(e) { notify(e.message || '操作失败，请重试。'); }
   finally { operation=false; }
 }
-enableStorySwipes(app);
+enableRowActions(document.body);
+drawer.addEventListener('close',()=>{ if (!drawer.open) drawer.replaceChildren(); });
 drawer.addEventListener('click',event=>{
   if (event.target !== drawer) return;
   const rect = drawer.getBoundingClientRect();
@@ -410,10 +448,20 @@ document.addEventListener('click',event=>{
   run(()=>dispatch(target.dataset.action,target.dataset.id));
 });
 document.addEventListener('submit',event=>{
+  if (event.target.matches('.name-form')) {
+    event.preventDefault();
+    run(()=>saveName(event.target));
+    return;
+  }
   const action={composer:'send','api-form':'save-api'}[event.target.id];
   if (action) { event.preventDefault(); run(()=>dispatch(action)); }
 });
 document.addEventListener('keydown',event=>{
+  if (event.key==='Escape' && event.target.closest('.name-form') && !event.isComposing) {
+    event.preventDefault();
+    renderNames(drawer.open?'chat':'story');
+    return;
+  }
   if (event.target.id==='draft' && event.key==='Enter' && (event.ctrlKey || event.metaKey) && !event.isComposing) {
     event.preventDefault(); run(send);
   }

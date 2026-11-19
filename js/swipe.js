@@ -1,7 +1,8 @@
-// A gesture moves the row cover. Only a separate button click can change a story.
-export function enableStorySwipes(root) {
+// Swiping or holding reveals controls. A separate click performs the action.
+export function enableRowActions(root) {
   let drag = null;
   let suppressClick = null;
+  let holdTimer;
 
   function reveal(row, open) {
     const previous = root.querySelector('.book-row.revealed');
@@ -9,8 +10,22 @@ export function enableStorySwipes(root) {
     row?.classList.toggle('revealed', open);
   }
 
+  function hold(row) {
+    if (!row.isConnected) return;
+    if (drag) drag.held = true;
+    reveal(row,true);
+    suppressClick = row;
+  }
+  root.addEventListener('contextmenu', event => {
+    const row = event.target.closest('.book-row[data-kind="chat"]');
+    if (!row || !event.target.closest('.book-open')) return;
+    event.preventDefault();
+    clearTimeout(holdTimer);
+    hold(row);
+  });
   document.addEventListener('pointerdown', event => {
     if (!event.isPrimary || event.button !== 0) return;
+    clearTimeout(holdTimer);
     suppressClick = null;
     const row = event.target.closest('.book-row');
     if (!row || !row.classList.contains('revealed')) reveal(null, false);
@@ -19,15 +34,20 @@ export function enableStorySwipes(root) {
     drag = {
       id: event.pointerId, row, face, x: event.clientX, y: event.clientY,
       width: row.querySelector('.row-actions').offsetWidth,
-      open: row.classList.contains('revealed'), horizontal: false
+      open: row.classList.contains('revealed'), horizontal: false, held: false
     };
+    if (row.dataset.kind === 'chat' && face.classList.contains('book-open')) {
+      holdTimer = setTimeout(()=>hold(row),500);
+    }
   });
   document.addEventListener('pointermove', event => {
     if (!drag || event.pointerId !== drag.id) return;
     const dx = event.clientX - drag.x;
     const dy = event.clientY - drag.y;
+    if (drag.held) return;
     if (!drag.horizontal) {
       if (Math.max(Math.abs(dx),Math.abs(dy)) < 8) return;
+      clearTimeout(holdTimer);
       if (Math.abs(dy) >= Math.abs(dx)) { suppressClick = drag.row; drag = null; return; }
       drag.horizontal = true;
       drag.row.classList.add('dragging');
@@ -38,6 +58,7 @@ export function enableStorySwipes(root) {
   });
   function finish(event) {
     if (!drag || event.pointerId !== drag.id) return;
+    clearTimeout(holdTimer);
     const { row, x, open, horizontal } = drag;
     drag = null;
     if (!horizontal) return;
@@ -49,6 +70,14 @@ export function enableStorySwipes(root) {
     row.classList.remove('dragging');
     row.style.removeProperty('--drag-x');
   }
+  window.addEventListener('blur', () => {
+    clearTimeout(holdTimer);
+    if (drag) {
+      drag.row.classList.remove('dragging');
+      drag.row.style.removeProperty('--drag-x');
+      drag = null;
+    }
+  });
   document.addEventListener('pointerup', finish);
   document.addEventListener('pointercancel', finish);
   root.addEventListener('click', event => {

@@ -19,6 +19,12 @@ function fill(selector, value) {
   if (!field) throw new Error('字段缺失：'+selector);
   field.value=value;field.dispatchEvent(new Event('input',{bubbles:true}));
 }
+async function inlineName(value) {
+  const field=el('.name-form input');
+  ok(field && !el('#modal[open]'),'名称须在原行编辑');
+  equal(el('.name-form').innerText.trim(),'保存');
+  fill('.name-form input',value);await action('.name-form [type="submit"]');
+}
 async function dialogText(value) {
   await wait(()=>el('dialog[open] [name=value]'),'编辑弹窗');
   fill('dialog [name=value]',value);await action('dialog form .primary');
@@ -84,16 +90,21 @@ async function main() {
     face.dispatchEvent(new (w().MouseEvent)('click',{bubbles:true,cancelable:true,detail:1}));
   }
   async function openDrawer() {
-    await click('backup-panel'); await wait(()=>el('#backup-drawer[open]'),'侧栏打开');
+    await click('backup-panel'); await wait(()=>el('#side-drawer[open]'),'侧栏打开');
   }
   installMock();mobile();
   equal(el('#app').innerText.trim(),'');
   equal(el('#nav h1').textContent,'Novel');
   await openDrawer();ok(el('[data-action="export-all"]').disabled,'空书架不应可导出');
-  await click('close-backup');
-  await click('new-story');await dialogText('验收书稿');await wait(()=>el('#draft'),'聊天');
+  await click('close-drawer');
+  await click('new-story');fill('.name-form input','取消的书稿');await click('cancel-name');
+  equal(el('#app').innerText.trim(),'');
+  await click('new-story');await inlineName('验收书稿');await wait(()=>el('#draft'),'聊天');
   equal(el('.reading').innerText.trim(),'');
-  await click('home');
+  ok(!el('[data-action="home"]') && !el('.session-button'),'聊天页不应显示主页入口或旧下拉框');
+  ok(el('[data-action="settings"] svg') && !el('#nav').innerText.includes('设置'),'设置应使用图标');
+  ok(el('[data-action="summary"]').getBoundingClientRect().right<=el('[data-action="send"]').getBoundingClientRect().left,'总结应在发送左边');
+  await click('settings');await click('home');
   equal(el('.book-row').innerText.trim(),'验收书稿');
   const originalLeft=el('.book-open').getBoundingClientRect().left;
   swipe(-120,4);
@@ -104,7 +115,8 @@ async function main() {
     return Math.abs(face.left-originalLeft)<1 && Math.abs(face.right-editBox.left)<1;
   },'展开后保留书名并露出操作');
   ok(el('.rename').textContent.trim()==='' && el('.delete').textContent.trim()==='','色块包含文字');
-  await click('rename-story');await dialogText('验收书稿 · 修订');
+  await click('rename-story');equal(el('.name-form input').value,'验收书稿');
+  await inlineName('验收书稿 · 修订');
   equal(el('.book-open').textContent,'验收书稿 · 修订');
   swipe(-120);await click('delete-story');await action('[data-return="cancel"]');
   equal(d().querySelectorAll('.book-row').length,1);
@@ -152,7 +164,32 @@ async function main() {
   ok(!history().includes('A1') && history().includes('B2 编辑'),'总结分支错误');
   await dialogText('修改过的前情');await send('开第二章','新章');
   equal(history(),['前情总结（本对话的起始背景）\n修改过的前情','开第二章']);
-  await click('chats');await action('.session-row:first-child button:first-child');equal(prose().at(-1),long);
+  await click('chats');
+  const panel=el('#side-drawer');
+  const rows=()=>panel.querySelectorAll('.book-open');
+  const rowClick=async(index,act)=>{
+    const button=rows()[index].closest('.book-row').querySelector('[data-action="'+act+'"]');
+    button.click();await tick(100);
+  };
+  await wait(()=>panel.open && Math.abs(panel.getBoundingClientRect().left)<1,'左侧展开');
+  equal(panel.querySelector('.drawer-head').innerText.trim(),'');
+  equal(rows().length,2);
+  equal(rows()[1].getAttribute('aria-current'),'true');
+  const holdFace=rows()[0];
+  const point=type=>holdFace.dispatchEvent(new (w().PointerEvent)(type,{bubbles:true,isPrimary:true,pointerId:4,pointerType:'touch',button:0,clientX:130,clientY:80}));
+  point('pointerdown');await wait(()=>holdFace.closest('.revealed'),'长按显示操作');point('pointerup');
+  holdFace.dispatchEvent(new (w().MouseEvent)('click',{bubbles:true,detail:1,cancelable:true}));
+  ok(panel.open && !el('#modal[open]') && rows()[1].hasAttribute('aria-current'),'松手不应切换或编辑');
+  await rowClick(0,'rename-chat');equal(el('.name-form input').value,'对话 1');
+  await inlineName('第一章');equal(rows()[0].textContent,'第一章');
+  await click('new-chat');await inlineName('临时对话');ok(!panel.open,'新建后应进入对话');
+  equal(prose(),[]);await click('chats');equal(rows().length,3);
+  swipe(-120);await rowClick(0,'delete-chat');ok(el('#modal[open] .icon-button svg'),'关闭须为 SVG');
+  await action('#modal [data-return="cancel"]');equal(rows().length,3);
+  rows()[2].dispatchEvent(new (w().KeyboardEvent)('keydown',{key:'ArrowLeft',bubbles:true}));
+  await rowClick(2,'delete-chat');await action('#modal [data-return="yes"]');equal(rows().length,2);
+  await rowClick(0,'use-chat');equal(prose().at(-1),long);
+  log('通过：左侧对话栏、长按和左滑、原行改名、新建与删除、SVG 关闭、总结与发送顺序');
   log('通过：总结只取当前分支、带入新会话、原对话完整保留');
   await click('settings');await click('export-one');await wait(()=>grabbed,'单故事文件');
   const one=grabbed;ok(!JSON.stringify(one).includes(fixtureKey),'备份含有密钥');equal(one.stories[0].chats.length,2);
@@ -166,7 +203,7 @@ async function main() {
   await action('[data-node] [data-action="remove"]');await action('[data-return="yes"]');
   equal(prose(),['A','A1','A 后续','A2']);
   log('通过：删除前确认，删除子树后恢复另一个版本');
-  await click('home');swipe(-110);await click('delete-story');await action('[data-return="yes"]');
+  await click('settings');await click('home');swipe(-110);await click('delete-story');await action('[data-return="yes"]');
   equal(d().querySelectorAll('.book-row').length,3);
   log('通过：点红色区域并确认后才删除故事');
   const worker=await w().navigator.serviceWorker.ready;
